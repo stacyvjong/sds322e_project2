@@ -46,7 +46,7 @@ class_diag <- function(score, truth, positive, cutoff=.5){
 
 # Mining, Classification, Prediction
 
-## Name and EID here
+## Stacy Jong svj284
 
 ### Introduction 
 
@@ -54,80 +54,219 @@ Paragraph or two introducing your datasets and variables, why they are interesti
 
 ```{R}
 library(tidyverse)
-# read your datasets in here, e.g., with read_csv()
+library(boot)
+melanoma<-melanoma
 
-# if your dataset needs tidying, do so here
-
-# any other code here
+nrow(melanoma)
+nrow(melanoma%>%filter(sex==0))
+nrow(melanoma%>%filter(sex==1))
+nrow(melanoma%>%filter(ulcer==0))
+nrow(melanoma%>%filter(ulcer==1))
+nrow(melanoma%>%filter(status==1))
+nrow(melanoma%>%filter(status==2))
+nrow(melanoma%>%filter(status==3))
+melanoma %>% select(year) %>% group_by(year) %>% summarize(count = n())
 ```
+
+The dataset of interest in this project is the melanoma dataset from the built-in R package "boot". This dataset describes various patients with malignant melanoma that were operated on at the University Hospital of Odense, Denmark, from 1962 to 1977. The variables in this dataset include time, status, sex, age, year, thickness, and ulcer. Among these the numeric variables are time, measuring the survival time in days since the operation, age, measuring the age of the patient in years at the time of the operation, and thickness, representing the tumour thickness in mm. There are a total of 205 observations in this dataset. This dataset has two binary variables: sex and ulcer. For the sex variable, there are 126 observations for female patients, 79 observations for male patients. For the ulcer variable, there are 115 observations with ulceration absent and 90 observations with ulceration present. Aside from the binary variables there is two other categorical variables, status,  and year. Status has three categories: 1, indicating that the patient had died from melanoma, 2, indicating that the patient was still alive, and 3, indicating that the patient had died from causes unrelated to melanoma. There are 57 observations in category 1, 134 observations in category 2, and 14 observations in category 3. Year has a category per year from 1962-1977, with the following number of observations per category, respectively: [1, 0, 1, 11, 10, 20, 21, 21, 19, 27, 41, 31, 1, 0, 0, 1].
+
 
 ### Cluster Analysis
 
 ```{R}
 library(cluster)
-# clustering code here
 ```
 
-Discussion of clustering here
+```{R}
+# pick number of clusters
+pam_dat <- melanoma %>% select(time, age, thickness)
+sil_width <- vector()
+for(i in 2:10){
+  pam_fit <- pam(pam_dat, k=i)
+  sil_width[i] <- pam_fit$silinfo$avg.width
+}
+ggplot()+geom_line(aes(x=1:10,y=sil_width))+scale_x_continuous(name="k",breaks=1:10)
+
+```
+
+Based on largest average silhouette width, we should use 3 clusters.
+
+```{R}
+# run pam and visualize
+library(GGally)
+pam1 <- pam_dat %>% scale %>% pam(k=3)
+pam_dat %>% mutate(cluster=as.factor(pam1$clustering)) %>% 
+ggpairs(columns = c("time","age", "thickness"), aes(color=cluster))
+```
+
+Age and time seem to be the most strongly correlated overall, with a correlation of -0.302. The pair of variables with the highest positive correlation was age and thickness, which had a correlation of 0.212. Time only has negative correlations with the other variables. Overall the correlations between these variables are fairly low.
     
+```{R}
+plot(pam1,which=2)
+```
+
+According to the silhouette plot, the final fit of this cluster solution is weak and could be artificial, with an average silhouette width of 0.29.
+
     
 ### Dimensionality Reduction with PCA
 
 ```{R}
 # PCA code here
+mel_nums <- melanoma %>% select(time, age, thickness) %>% scale
+mel_pca <-princomp(mel_nums, cor=T)
+summary(mel_pca, loadings=T)
+
+```
+```{R}
+eigval<-mel_pca$sdev^2 #square to convert SDs to eigenvalues
+varprop=round(eigval/sum(eigval), 2) #proportion of var explained by each PC
+ggplot() + geom_bar(aes(y=varprop, x=1:3), stat="identity") + xlab("") + geom_path(aes(y=varprop, x=1:3)) +
+  geom_text(aes(x=1:3, y=varprop, label=round(varprop, 2)), vjust=1, col="white", size=5) +
+  scale_y_continuous(breaks=seq(0, .6, .2), labels = scales::percent) + 
+  scale_x_continuous(breaks=1:10)
+
+round(cumsum(eigval)/sum(eigval), 2)
+eigval
 ```
 
-Discussions of PCA here. 
+From this scree plot, we can see that we should keep PC1 and PC2. We choose these two PCs because the cumulative proportion is >80% once we add PC3.
+
+
+```{R}
+meldf<-data.frame(PC1=mel_pca$scores[, 1],PC2=mel_pca$scores[, 2])
+ggplot(meldf, aes(PC1, PC2)) + geom_point()
+```
+
+PC1 has large negative correlations between age and thickness. Scoring high on PC1 means the patient had a high value for survival time since operation, but low values for age at time of operation and thickness of the tumour. Scoring low on PC1 would imply the opposite: a low value for time, but high values for age and thickness. PC2 has positive correlations between thickness and time. Scoring high on PC2 means the patient had a low value for age and a high values for time and thickness. Conversely, scoring low on PC2 means the patient had a high value for age but low value for time and thickness.
+
+```{R}
+varprop
+```
+PC1 accounts for 50% of the variance in the data, and PC2 accounts for 27% of the variance in the data. In total the two PCs account for 77% of the variance in the data.
 
 ###  Linear Classifier
 
 ```{R}
 # linear classifier code here
+fit <- glm(ulcer ~ time+age+thickness, data=melanoma, family="binomial")
+score <- predict(fit, type="response")
+class_diag(score,melanoma$ulcer,positive=1)
+table(actual=melanoma$ulcer, predicted=factor(score>.5))
 ```
+
+Running the class_diag function on our logistic regression model gives us an accuracy of 0.7512, meaning that the model predicts the indicator of ulceration correctly 75.12% of the time. We get a sensitivity of 0.5889, meaning 58.89% of the actual positives were correctly classified, and a specificity of 0.8783, meaning 87.83% of the actual negatives were correctly classified. We get a PPV of 0.791, indicating that 79.1% of the cases predicted to be positive were actually positive. The AUC for this model is 0.8163, which means that overall, this model using time, age, and thickness to predict presence of ulcer is good. The probability that a randomly selected person with an indicator of ulceration has a higher survival time, age at time of operation, and tumor thickness than a randomly selected person without an indicator of ulceration.
+
+
 
 ```{R}
 # cross-validation of linear classifier here
-```
+set.seed(1234)
+k=10
 
-Discussion here
+data<-melanoma[sample(nrow(melanoma)),]
+folds<-cut(seq(1:nrow(melanoma)), breaks=k, labels=F)
+
+
+diags<-NULL
+for(i in 1:k){
+  train<-data[folds!=i,] 
+  test<-data[folds==i,]
+  truth<-test$ulcer
+  
+  fit<-glm(ulcer~time+age+thickness,data=train, family="binomial")
+  
+  probs<-predict(fit,newdata = test,type="response")
+  
+  diags<-rbind(diags,class_diag(probs,truth, positive=1))
+}
+
+summarize_all(diags,mean)
+```
+The cross-validation AUC is 0.81011, which means overall the model is good in predicting indication of ulceration using time, age, and thickness on new data. The AUC is very close to the AUC given by the logistic regression model (0.8163). This indicates that the model is not overfitting since out-of-sample and in-sample performance are similar.
 
 ### Non-Parametric Classifier
 
 ```{R}
 library(caret)
 # non-parametric classifier code here
+knn_fit <- knn3(ulcer~time+age+thickness, data=melanoma, k=5)
+y_hat_knn <- predict(knn_fit, melanoma)
+class_diag(y_hat_knn[,2],melanoma$ulcer, positive=1)
+table(truth=melanoma$ulcer, prediction=factor(y_hat_knn[,2]>.5))
 ```
+
+Running the class_diag function on our knn model gives us an accuracy of 0.7463, meaning that the model predicts the indicator of ulceration correctly 74.63% of the time. We get a sensitivity of 0.6111, meaning 61.11% of the actual positives were correctly classified, and a specificity of 0.8522, meaning 85.22% of the actual negatives were correctly classified. We get a PPV of 0.7693, indicating that 76.93% of the cases predicted to be positive were actually positive. The AUC for this model is 0.8143, which means that overall, this model using time, age, and thickness to predict presence of ulcer is good.
+
 
 ```{R}
 # cross-validation of np classifier here
+set.seed(1234)
+k=10 #choose number of folds
+data<-melanoma[sample(nrow(melanoma)),] #randomly order rows
+folds<-cut(seq(1:nrow(melanoma)),breaks=k,labels=F) #create folds
+diags<-NULL
+for(i in 1:k){
+  train<-data[folds!=i,] 
+  test<-data[folds==i,]
+  truth<-test$ulcer
+  fit<-knn3(ulcer~time+age+thickness,data=train)
+  probs<-predict(fit,newdata = test)[,2]
+  diags<-rbind(diags,class_diag(probs,truth, positive=1))
+}
+summarize_all(diags,mean)
 ```
 
-Discussion
+The cross-validation AUC is 0.68092, which means overall the model performs poorly in predicting indication of ulceration using time, age, and thickness on new data. There are signs of overfitting, as the AUC for the cross-validation is much lower than the AUC of the original model, meaning that the model does not perform as well on test data in comparison to the training data. In its cross-validation performance, the knn model performs worse in comparison to the logistic regression model, which had an AUC of 0.81011.
 
 
 ### Regression/Numeric Prediction
 
 ```{R}
 # regression model code here
+fit <- lm(thickness ~ time+status+age, data=melanoma, family="binomial")
+yhat<-predict(fit)
+mean((melanoma$thickness-yhat)^2)
 ```
+The MSE for the overall dataset is 7.826314
 
 ```{R}
 # cross-validation of regression model here
+set.seed(1234)
+k=5 
+data<-melanoma[sample(nrow(melanoma)),] 
+folds<-cut(seq(1:nrow(melanoma)),breaks=k,labels=F) 
+diags<-NULL
+for(i in 1:k){
+  train<-data[folds!=i,]
+  test<-data[folds==i,]
+  fit<-lm(thickness~time+status+age,data=train)
+  yhat<-predict(fit,newdata=test)
+  diags<-mean((test$thickness-yhat)^2) 
+}
+mean(diags) 
 ```
+The average MSE across 5 folds is 6.531056. This does not show signs of overfitting, as the MSE on new data was actually lower, instead of higher, than the MSE for the overall dataset. If the MSE were higher, that would mean the linear regression model performs poorly on new data it has not seen before. 
 
-Discussion
+
 
 ### Python 
 
 ```{R}
 library(reticulate)
+firstname <- "Stacy"
 ```
 
 ```{python}
 # python code here
+lastname = "Jong"
+print(r.firstname, lastname)
 ```
 
-Discussion
+```{R}
+cat(c(firstname, py$lastname))
+```
+
+I initialized the variable firstname to the string "Stacy" in R, and initialized the variable lastname to "Jong" in python. I then demonstrated sharing objects between R and python by printing the R variable firstname in the python chunk, and printing the python variable lastname in the R chunk.
 
 ### Concluding Remarks
 
