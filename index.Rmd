@@ -270,7 +270,6 @@ I initialized the variable firstname to the string "Stacy" in R, and initialized
 
 ### Concluding Remarks
 
-Include concluding remarks here, if any
 
 
 
